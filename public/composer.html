@@ -1,0 +1,337 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Multiview Composer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 12px; background:#111; color:#ddd }
+    .controls { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    input.url { width:60%; padding:6px; border-radius:6px; border:1px solid #444; background:#222; color:#ddd }
+    button { padding:8px 12px; border-radius:6px; border:0; background:#1f6feb; color:#fff; cursor:pointer }
+    button.secondary { background:#444 }
+    #grid { display:grid; gap:6px; margin-top:8px }
+    .tile { background:#000; position:relative; min-height:60px; overflow:hidden; }
+    .tile video { width:100%; height:100%; object-fit:cover; background:#000 }
+    #canvasPreview { width: 100%; max-width: 1280px; border: 2px solid #333; display:block; margin-top:12px; background:#000 }
+    #log { margin-top:10px; font-size:12px; color:#aaa; white-space:pre-wrap; max-height:140px; overflow:auto; background:#050505; padding:8px; border-radius:6px; border:1px solid #222 }
+    label { font-size:13px; margin-right:8px }
+  </style>
+</head>
+<body>
+  <h2>Multiview Composer (up to 16)</h2>
+
+  <div class="controls">
+    <input id="urlInput" class="url" placeholder="Paste HLS/MP4 stream URL (one at a time) -- hit Add" value="https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8">
+    <button id="addBtn">Add stream</button>
+    <button id="clearBtn" class="secondary">Clear all</button>
+    <button id="startPublish">Start publish (WebRTC)</button>
+    <button id="stopPublish" class="secondary" disabled>Stop publish</button>
+    <label style="margin-left:12px">Room ID: <input id="roomId" value="room1" style="width:120px"></label>
+  </div>
+
+  <div id="grid"></div>
+
+  <canvas id="canvasPreview" width="1280" height="720"></canvas>
+
+  <div style="margin-top:8px">
+    <strong>Viewer URL (share this):</strong>
+    <div id="viewerUrl" style="margin-top:6px; color:#9fd"></div>
+  </div>
+
+  <div id="log"></div>
+
+  <!-- libs: hls.js and simple-peer via CDN, socket.io client -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // quick-savage UI + compositor
+    const MAX_STREAMS = 16;
+    const gridEl = document.getElementById('grid');
+    const canvas = document.getElementById('canvasPreview');
+    const ctx = canvas.getContext('2d');
+    const logEl = document.getElementById('log');
+    const viewerUrlEl = document.getElementById('viewerUrl');
+
+    const addBtn = document.getElementById('addBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const startPublishBtn = document.getElementById('startPublish');
+    const stopPublishBtn = document.getElementById('stopPublish');
+
+    const roomIdInput = document.getElementById('roomId');
+
+    let videoEls = []; // array of {url, video}
+    let raf = null;
+    let gridRows = 1, gridCols = 1;
+    let publishing = false;
+    let localStream = null;
+    let peers = {}; // viewerId => SimplePeer instance
+    const socket = io();
+
+    function log(...args) {
+      logEl.textContent = (new Date()).toLocaleTimeString() + ' ' + args.join(' ') + '\n' + logEl.textContent;
+    }
+
+    function updateGridLayout() {
+      const n = videoEls.length;
+      if (n <= 1) { gridRows = 1; gridCols = 1; }
+      else if (n <= 4) { gridRows = 2; gridCols = 2; }
+      else if (n <= 9) { gridRows = 3; gridCols = 3; }
+      else { gridRows = 4; gridCols = 4; }
+      gridEl.style.gridTemplateColumns = `repeat(${gridCols}, 1fr)`;
+    }
+
+    function rebuildTiles() {
+      gridEl.innerHTML = '';
+      videoEls.forEach((entry, idx) => {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.style.aspectRatio = '16/9';
+        tile.appendChild(entry.video);
+        gridEl.appendChild(tile);
+      });
+      // fill blanks up to grid size
+      const total = gridRows * gridCols;
+      for (let i = videoEls.length; i < total; ++i) {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.style.aspectRatio = '16/9';
+        gridEl.appendChild(tile);
+      }
+    }
+
+    function addStream(url) {
+      if (videoEls.length >= MAX_STREAMS) {
+        log('max streams reached');
+        return;
+      }
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.muted = true; // mute to allow autoplay
+      video.playsInline = true;
+      video.controls = false;
+      video.crossOrigin = "anonymous";
+
+      // try native or hls.js
+      if (Hls.isSupported() && url.match(/\.m3u8($|\?)/i)) {
+        const hls = new Hls();
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.ERROR, (e, data) => {
+          console.warn('hls error', data);
+          log('HLS error:', data.type, data.details);
+        });
+      } else {
+        video.src = url;
+      }
+
+      video.addEventListener('error', (e) => {
+        log('Video element error for', url, e);
+      });
+
+      const entry = { url, video };
+      videoEls.push(entry);
+      updateGridLayout();
+      rebuildTiles();
+
+      // attempt play; some streams require user gesture — but we muted video so should autoplay
+      video.play().catch(err => {
+        log('Autoplay blocked or error for', url, err.message || err);
+      });
+    }
+
+    document.getElementById('urlInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addBtn.click();
+    });
+
+    addBtn.onclick = () => {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+      addStream(url);
+    };
+
+    clearBtn.onclick = () => {
+      videoEls.forEach(e => {
+        try { e.video.pause(); e.video.src = ''; } catch(_) {}
+      });
+      videoEls = [];
+      updateGridLayout();
+      rebuildTiles();
+    };
+
+    // compositor: draw grid onto canvas at 25 FPS
+    const TARGET_FPS = 25;
+    const FRAME_PERIOD = 1000 / TARGET_FPS;
+
+    let lastTime = 0;
+    function drawLoop(ts) {
+      if (!lastTime) lastTime = ts;
+      const elapsed = ts - lastTime;
+      if (elapsed >= FRAME_PERIOD) {
+        lastTime = ts;
+        drawComposite();
+      }
+      raf = requestAnimationFrame(drawLoop);
+    }
+
+    function drawComposite() {
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, w, h);
+
+      const total = gridRows * gridCols;
+      const tileW = Math.floor(w / gridCols);
+      const tileH = Math.floor(h / gridRows);
+
+      for (let i = 0; i < total; ++i) {
+        const r = Math.floor(i / gridCols);
+        const c = i % gridCols;
+        const x = c * tileW;
+        const y = r * tileH;
+
+        if (i < videoEls.length) {
+          const vid = videoEls[i].video;
+          if (vid.readyState >= 2) {
+            try {
+              // draw video into tile
+              ctx.drawImage(vid, x, y, tileW, tileH);
+            } catch (e) {
+              // crossOrigin or not ready
+            }
+          } else {
+            // placeholder
+            ctx.fillStyle = '#111';
+            ctx.fillRect(x, y, tileW, tileH);
+          }
+        } else {
+          // blank tile
+          ctx.fillStyle = '#000';
+          ctx.fillRect(x, y, tileW, tileH);
+        }
+      }
+    }
+
+    // start compositor loop on load
+    updateGridLayout();
+    rebuildTiles();
+    raf = requestAnimationFrame(drawLoop);
+
+    // WebRTC publishing: when a viewer connects, we create a peer for them.
+    // Simple signalling: rooms used. Composer is the initiator for sending stream.
+    function startPublishing() {
+      if (publishing) return;
+      const roomId = roomIdInput.value.trim() || 'room1';
+      socket.emit('join-room', { roomId, role: 'composer' });
+      publishing = true;
+      startPublishBtn.disabled = true;
+      stopPublishBtn.disabled = false;
+
+      // prepare local stream from canvas
+      localStream = canvas.captureStream(25); // 25fps
+      // optionally add audio from a chosen video or mic
+      log('Publishing canvas stream, fps 25');
+
+      // tell UI the viewer URL
+      const viewerUrl = `${location.origin}/viewer.html?room=${encodeURIComponent(roomId)}`;
+      viewerUrlEl.textContent = viewerUrl;
+
+      // when a new socket connects to room, server will emit composer-ready to watchers.
+      // viewers will create their peer and send an offer to us via signalling -> we handle in socket.on('signal')
+      socket.on('signal', async ({ from, data }) => {
+        // data is the offer/answer/ice passed by simple-peer
+        // We expect viewers to be initiators (they send offer), so we create a non-initiator peer here.
+        console.log('signal from', from, data);
+
+        // if peer exists, forward signal to it
+        if (peers[from]) {
+          peers[from].signal(data);
+          return;
+        }
+
+        // create peer in non-initiator mode (viewer already created offer)
+        const peer = new SimplePeer({ initiator: false, trickle: false, stream: localStream });
+        peers[from] = peer;
+
+        peer.on('signal', (signalData) => {
+          // send back to viewer
+          socket.emit('signal', { to: from, data: signalData });
+        });
+
+        peer.on('connect', () => {
+          log('Peer connected:', from);
+        });
+        peer.on('error', (err) => {
+          log('Peer error:', err);
+        });
+        peer.on('close', () => {
+          log('Peer closed:', from);
+          try { peer.destroy(); } catch(_) {}
+          delete peers[from];
+        });
+
+        // pass the incoming signal (viewer offer)
+        try {
+          peer.signal(data);
+        } catch (e) {
+          console.error('signal error', e);
+        }
+      });
+
+      socket.on('peer-disconnected', ({ id, role }) => {
+        if (peers[id]) {
+          try { peers[id].destroy(); } catch(_) {}
+          delete peers[id];
+        }
+        log('Peer left', id, role);
+      });
+    }
+
+    function stopPublishing() {
+      if (!publishing) return;
+      // close peers
+      Object.keys(peers).forEach(id => {
+        try { peers[id].destroy(); } catch(_) {}
+        delete peers[id];
+      });
+      // stop local capture tracks
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      socket.off('signal');
+      socket.off('peer-disconnected');
+      publishing = false;
+      startPublishBtn.disabled = false;
+      stopPublishBtn.disabled = true;
+      log('Stopped publishing');
+    }
+
+    startPublishBtn.onclick = startPublishing;
+    stopPublishBtn.onclick = stopPublishing;
+
+    // handle leave/unload
+    window.addEventListener('beforeunload', () => {
+      try { stopPublishing(); } catch(_) {}
+    });
+
+    // small UX: add 2 sample streams for quick demo (you can remove)
+    addStream('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8');
+    // addStream('https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8');
+
+    // adjust canvas size to fit container width responsively
+    function fitCanvas() {
+      const max = Math.min(window.innerWidth - 40, 1280);
+      const ar = canvas.width / canvas.height;
+      canvas.style.width = max + 'px';
+      canvas.style.height = Math.round(max / ar) + 'px';
+    }
+    window.addEventListener('resize', fitCanvas);
+    fitCanvas();
+  </script>
+</body>
+</html>
+

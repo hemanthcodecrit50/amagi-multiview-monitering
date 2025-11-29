@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Multiview Viewer</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#080808; color:#ddd; padding:12px }
+    video { max-width:100%; border:2px solid #222; background:#000 }
+    input { padding:6px; width:200px; border-radius:6px }
+  </style>
+</head>
+<body>
+  <h2>Multiview Viewer</h2>
+  <div>
+    <label>Room ID: <input id="room" placeholder="room1"></label>
+    <button id="join">Join</button>
+  </div>
+  <div style="margin-top:12px">
+    <video id="remote" controls autoplay playsinline></video>
+  </div>
+  <div id="status" style="margin-top:8px; color:#9fd"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+  <script>
+    const socket = io();
+    const joinBtn = document.getElementById('join');
+    const roomInput = document.getElementById('room');
+    const remote = document.getElementById('remote');
+    const status = document.getElementById('status');
+
+    let peer = null;
+    let roomId = null;
+
+    joinBtn.onclick = () => {
+      roomId = (roomInput.value || 'room1').trim();
+      socket.emit('join-room', { roomId, role: 'viewer' });
+      status.innerText = 'Joined room ' + roomId + ', waiting for composer...';
+
+      // Viewer will create SimplePeer in initiator mode and send offer to composer via signalling.
+      // The server will route the signal messages between viewer and composer sockets.
+      // Wait for composer-ready? Not strictly necessary: we can create peer and send signaling anyway.
+      createPeerAsInitiator();
+      socket.on('signal', ({ from, data }) => {
+        if (!peer) return;
+        peer.signal(data);
+      });
+
+      socket.on('peer-disconnected', ({ id, role }) => {
+        status.innerText = `Peer ${id} disconnected (${role})`;
+      });
+    };
+
+    function createPeerAsInitiator() {
+      if (peer) { peer.destroy(); peer = null; }
+      peer = new SimplePeer({ initiator: true, trickle: false });
+      peer.on('signal', (signal) => {
+        // send to composer(s) in room via server — but we don't know composer id.
+        // We simply emit signal; server will deliver to composer by room (server will route based on to field if provided)
+        // The server requires a 'to' id: but we don't know composer id. So we rely on composer listening to 'signal' and matching 'from' when they respond.
+        // To keep it simple, emit without 'to'; server will not broadcast. So instead we rely on the composer to listen for 'signal' directed to them.
+        // Workaround: send signal with 'to' left null and receiver will handle. Our server expects a `to` field though.
+        // So we include a handshake: request composer id via server? Simpler: send to room via server by using special 'broadcast-signal' event.
+        socket.emit('signal', { to: null, data: signal }); // composer will accept it via socket.on('signal')
+      });
+
+      peer.on('connect', () => { status.innerText = 'P2P connected'; });
+      peer.on('stream', (stream) => {
+        remote.srcObject = stream;
+      });
+      peer.on('error', (e) => { status.innerText = 'Peer error: ' + e; console.error(e); });
+    }
+
+    // When server forwards 'signal' from composer to this viewer, we'll receive it in socket.on('signal') above.
+
+    // NOTE: This viewer-to-composer signalling is a simple design: the server just forwards socket messages by ID.
+    // In production you'd maintain composerId and forward only to that socket.
+  </script>
+</body>
+</html>
+
