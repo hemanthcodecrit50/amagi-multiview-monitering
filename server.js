@@ -23,6 +23,29 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'composer.html'));
 });
 
+// Helper function to count active rooms and viewers
+function updateSystemMetrics() {
+  const rooms = io.sockets.adapter.rooms;
+  let activeRooms = 0;
+  let totalViewers = 0;
+
+  rooms.forEach((sockets, roomId) => {
+    // Skip individual socket rooms (they match socket IDs)
+    if (!io.sockets.sockets.has(roomId)) {
+      activeRooms++;
+      // Count viewers in this room
+      sockets.forEach((socketId) => {
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket && socket.data.role === 'viewer') {
+          totalViewers++;
+        }
+      });
+    }
+  });
+
+  monitoringService.updateSystemMetrics(activeRooms, totalViewers);
+}
+
 io.on('connection', (socket) => {
   console.log('socket connected', socket.id);
 
@@ -54,28 +77,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('socket disconnected', socket.id);
     const roomId = socket.data.roomId;
-// Helper function to count active rooms and viewers
-function updateSystemMetrics() {
-  const rooms = io.sockets.adapter.rooms;
-  let activeRooms = 0;
-  let totalViewers = 0;
-
-  rooms.forEach((sockets, roomId) => {
-    // Skip individual socket rooms (they match socket IDs)
-    if (!io.sockets.sockets.has(roomId)) {
-      activeRooms++;
-      // Count viewers in this room
-      sockets.forEach((socketId) => {
-        const socket = io.sockets.sockets.get(socketId);
-        if (socket && socket.data.role === 'viewer') {
-          totalViewers++;
-        }
-      });
+    if (roomId) {
+      socket.to(roomId).emit('peer-disconnected', { id: socket.id, role: socket.data.role });
     }
-  });
 
-  monitoringService.updateSystemMetrics(activeRooms, totalViewers);
-}
+    // Update system metrics
+    updateSystemMetrics();
+  });
+});
 
 // Update system metrics periodically
 setInterval(updateSystemMetrics, 10000);
@@ -112,14 +121,5 @@ process.on('SIGTERM', async () => {
     console.log('Server closed');
     process.exit(0);
   });
-});
-    // Update system metrics
-    updateSystemMetrics();
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
 });
 
