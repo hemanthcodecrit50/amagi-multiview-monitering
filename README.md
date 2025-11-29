@@ -38,9 +38,11 @@ The server will start on `http://localhost:3000`
 
 ### Access the Application
 
-- **Composer**: `http://localhost:3000/composer.html`
-- **Viewer**: `http://localhost:3000/viewer.html`
-- **Monitoring API**: `http://localhost:3000/api/monitor/dashboard`
+- **Composer**: `http://localhost:3000/composer.html` - Create and manage multiview streams
+- **Viewer**: `http://localhost:3000/viewer.html` - Watch the composite stream
+- **Monitoring Dashboard**: `http://localhost:3000/dashboard.html` - **NEW!** Visual monitoring dashboard
+- **Test Dashboard**: `http://localhost:3000/test-monitoring.html` - WebSocket testing interface
+- **Monitoring API**: `http://localhost:3000/api/monitor/dashboard` - REST API endpoint
 
 ## 📖 Usage
 

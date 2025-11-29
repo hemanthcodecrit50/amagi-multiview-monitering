@@ -6,10 +6,11 @@
 const config = require('./monitoringConfig');
 
 class MonitoringWebSocket {
-  constructor(io, metricsCollector, alertManager) {
+  constructor(io, metricsCollector, alertManager, monitoringService) {
     this.io = io;
     this.metricsCollector = metricsCollector;
     this.alertManager = alertManager;
+    this.monitoringService = monitoringService;
     this.monitoringClients = new Set();
   }
 
@@ -117,11 +118,46 @@ class MonitoringWebSocket {
       socket.emit('monitoring:alerts-snapshot', alerts);
     });
 
+    // Client registers a new stream for monitoring
+    socket.on('monitoring:register-stream', ({ streamId, url, roomId }) => {
+      console.log(`[MonitoringWS] Registering stream ${streamId} from ${url}`);
+      
+      // Register stream with monitoring service
+      const monitor = this.monitoringService.registerStream(streamId, url, roomId);
+      
+      if (monitor) {
+        // Set initial state
+        monitor.updateState('connected');
+        
+        // Broadcast stream registration
+        this.io.to('monitoring').emit('monitoring:stream-registered', {
+          streamId,
+          url,
+          roomId,
+          timestamp: Date.now()
+        });
+      }
+    });
+
     // Client reports stream metrics (from client-side monitoring)
     socket.on('monitoring:report-stream-metrics', ({ streamId, metrics }) => {
+      console.log(`[MonitoringWS] Received metrics for stream ${streamId}:`, metrics);
+      console.log(`[MonitoringWS] Current registered streams:`, Array.from(this.metricsCollector.streams.keys()));
+      
       const monitor = this.metricsCollector.streams.get(streamId);
       if (monitor) {
+        console.log(`[MonitoringWS] Updating existing monitor for ${streamId}`);
         monitor.updateMetrics(metrics);
+      } else {
+        // Auto-register if not found
+        console.log(`[MonitoringWS] Auto-registering stream ${streamId} with URL from metrics`);
+        const newMonitor = this.monitoringService.registerStream(streamId, metrics.url || 'unknown', 'default');
+        if (newMonitor) {
+          console.log(`[MonitoringWS] Successfully auto-registered ${streamId}`);
+          newMonitor.updateMetrics(metrics);
+        } else {
+          console.error(`[MonitoringWS] Failed to auto-register stream ${streamId}`);
+        }
       }
     });
 

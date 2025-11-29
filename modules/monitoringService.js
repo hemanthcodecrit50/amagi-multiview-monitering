@@ -20,7 +20,7 @@ class MonitoringService {
     this.metricsCollector = new MetricsCollector();
     this.alertManager = new AlertManager(io);
     this.database = new MonitoringDatabase();
-    this.websocket = new MonitoringWebSocket(io, this.metricsCollector, this.alertManager);
+    this.websocket = new MonitoringWebSocket(io, this.metricsCollector, this.alertManager, this);
     
     // Cleanup interval
     this.cleanupInterval = null;

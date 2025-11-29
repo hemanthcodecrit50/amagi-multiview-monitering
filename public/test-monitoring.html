@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Monitoring WebSocket Test</title>
+  <style>
+    body { 
+      font-family: 'Courier New', monospace; 
+      background: #0a0a0a; 
+      color: #00ff00; 
+      padding: 20px; 
+      margin: 0;
+    }
+    h1 { 
+      color: #00ff00; 
+      text-shadow: 0 0 10px #00ff00;
+      border-bottom: 2px solid #00ff00;
+      padding-bottom: 10px;
+    }
+    .controls {
+      margin: 20px 0;
+      padding: 15px;
+      background: #1a1a1a;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+    }
+    button {
+      background: #003300;
+      color: #00ff00;
+      border: 1px solid #00ff00;
+      padding: 10px 20px;
+      margin: 5px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      border-radius: 3px;
+      transition: all 0.3s;
+    }
+    button:hover {
+      background: #00ff00;
+      color: #000;
+      box-shadow: 0 0 10px #00ff00;
+    }
+    button:active {
+      transform: scale(0.95);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      margin: 20px 0;
+    }
+    .stat-card {
+      background: #1a1a1a;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+      padding: 15px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #00aa00;
+      margin-bottom: 5px;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #00ff00;
+    }
+    .logs {
+      max-height: 500px;
+      overflow-y: auto;
+      background: #000;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+      padding: 10px;
+      font-size: 13px;
+    }
+    .log-entry {
+      padding: 8px;
+      margin: 5px 0;
+      border-left: 3px solid #00ff00;
+      background: #0a0a0a;
+      animation: slideIn 0.3s ease-out;
+    }
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+    .log-time {
+      color: #00aa00;
+      margin-right: 10px;
+    }
+    .log-message {
+      color: #00ff00;
+    }
+    .alert-log {
+      border-left-color: #ff0000;
+      background: #1a0000;
+    }
+    .alert-log .log-message {
+      color: #ff0000;
+    }
+    .warning-log {
+      border-left-color: #ffaa00;
+      background: #1a1000;
+    }
+    .warning-log .log-message {
+      color: #ffaa00;
+    }
+    .metric-log {
+      border-left-color: #00aaff;
+      background: #001a1a;
+    }
+    .metric-log .log-message {
+      color: #00aaff;
+    }
+    .success-log {
+      border-left-color: #00ff00;
+      background: #001a00;
+    }
+    .connection-status {
+      display: inline-block;
+      padding: 5px 15px;
+      border-radius: 20px;
+      font-size: 12px;
+      margin-left: 10px;
+    }
+    .connected {
+      background: #003300;
+      color: #00ff00;
+      border: 1px solid #00ff00;
+    }
+    .disconnected {
+      background: #330000;
+      color: #ff0000;
+      border: 1px solid #ff0000;
+    }
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      background: #1a1a1a;
+      border: 1px solid #00ff00;
+      border-radius: 5px;
+    }
+    .test-section h3 {
+      margin-top: 0;
+      color: #00ff00;
+    }
+    input[type="text"] {
+      background: #000;
+      color: #00ff00;
+      border: 1px solid #00ff00;
+      padding: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      border-radius: 3px;
+      width: 300px;
+    }
+    pre {
+      background: #000;
+      border: 1px solid #00ff00;
+      border-radius: 3px;
+      padding: 10px;
+      overflow-x: auto;
+      color: #00ff00;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Multiview Monitoring System Test Dashboard</h1>
+  
+  <div class="controls">
+    <strong>Connection:</strong>
+    <span id="connectionStatus" class="connection-status disconnected">Disconnected</span>
+    <div style="margin-top: 10px;">
+      <button onclick="subscribe()">📡 Subscribe to Monitoring</button>
+      <button onclick="unsubscribe()">🔇 Unsubscribe</button>
+      <button onclick="requestDashboard()">📊 Get Dashboard</button>
+      <button onclick="clearLogs()">🗑️ Clear Logs</button>
+      <button onclick="clearStats()">📉 Clear Stats</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Streams</div>
+      <div class="stat-value" id="statTotalStreams">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Healthy Streams</div>
+      <div class="stat-value" id="statHealthyStreams">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Alerts</div>
+      <div class="stat-value" id="statActiveAlerts">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Viewers</div>
+      <div class="stat-value" id="statTotalViewers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Health Score</div>
+      <div class="stat-value" id="statAvgHealth">--</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Events Received</div>
+      <div class="stat-value" id="statEventsReceived">0</div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h3>🧪 Trigger Test Alerts</h3>
+    <p style="color: #00aa00; font-size: 12px;">
+      Stream ID: <input type="text" id="testStreamId" value="stream-1" placeholder="Enter stream ID">
+    </p>
+    <button onclick="triggerLowBitrate()">⚠️ Low Bitrate</button>
+    <button onclick="triggerLowFPS()">⚠️ Low FPS</button>
+    <button onclick="triggerHighFrameDrop()">❌ High Frame Drop</button>
+    <button onclick="triggerHighLatency()">⏱️ High Latency</button>
+    <button onclick="triggerMultipleAlerts()">🚨 Multiple Alerts</button>
+    <button onclick="sendGoodMetrics()">✅ Good Metrics</button>
+  </div>
+
+  <div class="test-section">
+    <h3>📋 Event Logs</h3>
+    <div class="logs" id="logs"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const logsDiv = document.getElementById('logs');
+    const connectionStatus = document.getElementById('connectionStatus');
+    let eventsReceived = 0;
+    let subscribed = false;
+
+    function log(message, type = 'info') {
+      eventsReceived++;
+      document.getElementById('statEventsReceived').textContent = eventsReceived;
+
+      const div = document.createElement('div');
+      const logClass = type === 'alert' ? 'alert-log' : 
+                       type === 'warning' ? 'warning-log' : 
+                       type === 'metric' ? 'metric-log' : 
+                       type === 'success' ? 'success-log' : '';
+      div.className = 'log-entry ' + logClass;
+      
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'log-time';
+      timeSpan.textContent = new Date().toLocaleTimeString();
+      
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'log-message';
+      msgSpan.textContent = message;
+      
+      div.appendChild(timeSpan);
+      div.appendChild(msgSpan);
+      logsDiv.insertBefore(div, logsDiv.firstChild);
+
+      // Keep only last 100 logs
+      while (logsDiv.children.length > 100) {
+        logsDiv.removeChild(logsDiv.lastChild);
+      }
+    }
+
+    function clearLogs() {
+      logsDiv.innerHTML = '';
+      log('Logs cleared', 'info');
+    }
+
+    function clearStats() {
+      eventsReceived = 0;
+      updateStats({
+        totalStreams: 0,
+        healthyStreams: 0,
+        activeAlerts: 0,
+        totalViewers: 0,
+        avgHealthScore: '--'
+      });
+      log('Statistics cleared', 'info');
+    }
+
+    function updateStats(data) {
+      if (data.totalStreams !== undefined) 
+        document.getElementById('statTotalStreams').textContent = data.totalStreams;
+      if (data.healthyStreams !== undefined) 
+        document.getElementById('statHealthyStreams').textContent = data.healthyStreams;
+      if (data.activeAlerts !== undefined) 
+        document.getElementById('statActiveAlerts').textContent = data.activeAlerts;
+      if (data.totalViewers !== undefined) 
+        document.getElementById('statTotalViewers').textContent = data.totalViewers;
+      if (data.avgHealthScore !== undefined) 
+        document.getElementById('statAvgHealth').textContent = 
+          data.avgHealthScore === '--' ? '--' : Math.round(data.avgHealthScore);
+      if (data.eventsReceived !== undefined)
+        document.getElementById('statEventsReceived').textContent = data.eventsReceived;
+    }
+
+    socket.on('connect', () => {
+      log('✅ Socket connected: ' + socket.id, 'success');
+      connectionStatus.textContent = 'Connected';
+      connectionStatus.className = 'connection-status connected';
+    });
+
+    socket.on('disconnect', () => {
+      log('❌ Socket disconnected', 'alert');
+      connectionStatus.textContent = 'Disconnected';
+      connectionStatus.className = 'connection-status disconnected';
+      subscribed = false;
+    });
+
+    function subscribe() {
+      if (subscribed) {
+        log('Already subscribed', 'warning');
+        return;
+      }
+      log('📡 Subscribing to monitoring...', 'info');
+      socket.emit('monitoring:subscribe');
+      subscribed = true;
+    }
+
+    function unsubscribe() {
+      if (!subscribed) {
+        log('Not subscribed', 'warning');
+        return;
+      }
+      log('🔇 Unsubscribing from monitoring...', 'info');
+      socket.emit('monitoring:unsubscribe');
+      subscribed = false;
+    }
+
+    function requestDashboard() {
+      log('📊 Requesting dashboard data...', 'info');
+      fetch('/api/monitor/dashboard')
+        .then(res => res.json())
+        .then(data => {
+          log('Dashboard data received: ' + JSON.stringify(data.summary), 'metric');
+          updateStats({
+            totalStreams: data.summary.totalStreams,
+            healthyStreams: data.summary.healthyStreams,
+            activeAlerts: data.activeAlerts.length,
+            avgHealthScore: data.summary.avgHealthScore
+          });
+        })
+        .catch(err => log('Error fetching dashboard: ' + err.message, 'alert'));
+    }
+
+    socket.on('monitoring:initial-state', (data) => {
+      log('📊 Initial state received', 'success');
+      console.log('Initial state:', data);
+      updateStats({
+        totalStreams: data.summary.totalStreams,
+        healthyStreams: data.summary.healthyStreams,
+        activeAlerts: data.activeAlerts ? data.activeAlerts.length : 0,
+        avgHealthScore: data.summary.avgHealthScore
+      });
+    });
+
+    socket.on('monitoring:metrics-update', (data) => {
+      log('📈 Metrics update - Status: ' + data.summary.overallStatus, 'metric');
+      updateStats({
+        totalStreams: data.summary.totalStreams,
+        healthyStreams: data.summary.healthyStreams,
+        avgHealthScore: data.summary.avgHealthScore
+      });
+    });
+
+    socket.on('monitoring:stream-metrics', (data) => {
+      log('📊 Stream metrics: ' + data.streamId + ' | Health: ' + data.health + ' | Status: ' + data.status, 'metric');
+    });
+
+    socket.on('monitoring:stream-state-change', (data) => {
+      log('🔄 Stream state change: ' + data.streamId + ' → ' + data.state, 'info');
+    });
+
+    socket.on('monitoring:alert', (alert) => {
+      const severity = alert.severity.toUpperCase();
+      const icon = severity === 'CRITICAL' ? '🔴' : 
+                   severity === 'ERROR' ? '❌' : 
+                   severity === 'WARNING' ? '⚠️' : 'ℹ️';
+      log(icon + ' ALERT [' + severity + '] ' + alert.type + ' - Stream: ' + alert.streamId, 'alert');
+      console.log('Alert details:', alert);
+      
+      // Update alert count
+      const currentAlerts = parseInt(document.getElementById('statActiveAlerts').textContent) || 0;
+      document.getElementById('statActiveAlerts').textContent = currentAlerts + 1;
+    });
+
+    socket.on('monitoring:alert-resolved', (alert) => {
+      log('✅ Alert resolved: ' + alert.type + ' for ' + alert.streamId, 'success');
+      
+      // Update alert count
+      const currentAlerts = parseInt(document.getElementById('statActiveAlerts').textContent) || 0;
+      document.getElementById('statActiveAlerts').textContent = Math.max(0, currentAlerts - 1);
+    });
+
+    socket.on('monitoring:critical-alert', (alert) => {
+      log('🚨 CRITICAL ALERT: ' + alert.type + ' - ' + alert.streamId, 'alert');
+      console.log('Critical alert:', alert);
+    });
+
+    socket.on('monitoring:compositor-metrics', (data) => {
+      log('🎬 Compositor: FPS=' + data.outputFps + ' | Streams=' + data.activeStreams, 'metric');
+    });
+
+    socket.on('monitoring:webrtc-metrics', (data) => {
+      log('🌐 WebRTC: Peers=' + data.peersConnected + ' | Loss=' + (data.packetLoss * 100).toFixed(2) + '%', 'metric');
+    });
+
+    socket.on('monitoring:system-metrics', (data) => {
+      log('💻 System: Rooms=' + data.activeRooms + ' | Viewers=' + data.totalViewers, 'metric');
+      updateStats({
+        totalViewers: data.totalViewers
+      });
+    });
+
+    // Test alert triggers
+    function getStreamId() {
+      return document.getElementById('testStreamId').value || 'stream-1';
+    }
+
+    function triggerLowBitrate() {
+      const streamId = getStreamId();
+      log('🧪 Triggering low bitrate alert for ' + streamId, 'warning');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 300000,  // 300 Kbps - below 500 Kbps threshold
+          fps: 25,
+          frameDrops: 0,
+          latency: 1000
+        }
+      });
+    }
+
+    function triggerLowFPS() {
+      const streamId = getStreamId();
+      log('🧪 Triggering low FPS alert for ' + streamId, 'warning');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 2500000,
+          fps: 15,  // Below 20 FPS threshold
+          frameDrops: 0,
+          latency: 1000
+        }
+      });
+    }
+
+    function triggerHighFrameDrop() {
+      const streamId = getStreamId();
+      log('🧪 Triggering high frame drop alert for ' + streamId, 'warning');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 2500000,
+          fps: 25,
+          frameDrops: 150,  // High frame drops
+          latency: 1000
+        }
+      });
+    }
+
+    function triggerHighLatency() {
+      const streamId = getStreamId();
+      log('🧪 Triggering high latency alert for ' + streamId, 'warning');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 2500000,
+          fps: 25,
+          frameDrops: 5,
+          latency: 8000  // 8 seconds - above 5s threshold
+        }
+      });
+    }
+
+    function triggerMultipleAlerts() {
+      const streamId = getStreamId();
+      log('🧪 Triggering MULTIPLE alerts for ' + streamId, 'warning');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 300000,   // LOW
+          fps: 15,           // LOW
+          frameDrops: 200,   // HIGH
+          latency: 8000      // HIGH
+        }
+      });
+    }
+
+    function sendGoodMetrics() {
+      const streamId = getStreamId();
+      log('🧪 Sending good metrics for ' + streamId, 'success');
+      socket.emit('monitoring:report-stream-metrics', {
+        streamId: streamId,
+        metrics: {
+          bitrate: 2500000,  // Good
+          fps: 30,           // Good
+          frameDrops: 2,     // Low
+          latency: 1000      // Good
+        }
+      });
+    }
+
+    // Auto-subscribe on load after 1 second
+    setTimeout(() => {
+      log('🚀 Auto-subscribing to monitoring...', 'info');
+      subscribe();
+    }, 1000);
+  </script>
+</body>
+</html>

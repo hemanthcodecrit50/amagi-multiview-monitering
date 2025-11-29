@@ -23,6 +23,12 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
   <script>
+    // Fix for simple-peer chrome detection in non-Chrome browsers
+    if (typeof chrome === 'undefined') {
+      window.chrome = {};
+    }
+  </script>
+  <script>
     const socket = io();
     const joinBtn = document.getElementById('join');
     const roomInput = document.getElementById('room');

@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Monitoring Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #2a2a3e;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      color: #00d4ff;
+      text-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+    }
+
+    .status-badge {
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-healthy { background: #00ff88; color: #003320; }
+    .status-degraded { background: #ffaa00; color: #332200; }
+    .status-error { background: #ff4444; color: #330000; }
+    .status-warning { background: #ffdd00; color: #332200; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.8; }
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #00d4ff 0%, #0077ff 100%);
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: linear-gradient(135deg, #444 0%, #666 100%);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 15px;
+      padding: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 30px rgba(0, 212, 255, 0.2);
+      border-color: rgba(0, 212, 255, 0.3);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .card-icon {
+      font-size: 24px;
+    }
+
+    .card-value {
+      font-size: 48px;
+      font-weight: bold;
+      color: #00d4ff;
+      text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+      margin-bottom: 10px;
+    }
+
+    .card-label {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .section {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 15px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 20px;
+      color: #00d4ff;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .stream-list {
+      display: grid;
+      gap: 15px;
+    }
+
+    .stream-item {
+      background: rgba(255, 255, 255, 0.05);
+      border-left: 4px solid #00d4ff;
+      border-radius: 8px;
+      padding: 15px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 15px;
+      align-items: center;
+      transition: all 0.3s;
+    }
+
+    .stream-item:hover {
+      background: rgba(255, 255, 255, 0.08);
+      transform: translateX(5px);
+    }
+
+    .stream-item.degraded { border-left-color: #ffaa00; }
+    .stream-item.error { border-left-color: #ff4444; }
+
+    .stream-health {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: bold;
+      background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%);
+      color: #003320;
+      box-shadow: 0 5px 15px rgba(0, 255, 136, 0.3);
+    }
+
+    .stream-health.degraded {
+      background: linear-gradient(135deg, #ffaa00 0%, #ff8800 100%);
+      color: #332200;
+      box-shadow: 0 5px 15px rgba(255, 170, 0, 0.3);
+    }
+
+    .stream-health.error {
+      background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+      color: #330000;
+      box-shadow: 0 5px 15px rgba(255, 68, 68, 0.3);
+    }
+
+    .stream-info {
+      flex: 1;
+    }
+
+    .stream-id {
+      font-size: 14px;
+      font-weight: bold;
+      color: #00d4ff;
+      margin-bottom: 5px;
+    }
+
+    .stream-url {
+      font-size: 12px;
+      color: #888;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 400px;
+    }
+
+    .stream-metrics {
+      display: flex;
+      gap: 15px;
+      margin-top: 10px;
+    }
+
+    .metric {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .metric-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #00d4ff;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      color: #666;
+      text-transform: uppercase;
+    }
+
+    .stream-status {
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+
+    .status-playing { background: #00ff88; color: #003320; }
+    .status-buffering { background: #ffaa00; color: #332200; }
+    .status-paused { background: #666; color: #fff; }
+    .status-error { background: #ff4444; color: #fff; }
+
+    .alerts-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .alert-item {
+      background: rgba(255, 68, 68, 0.1);
+      border-left: 4px solid #ff4444;
+      border-radius: 8px;
+      padding: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    .alert-item.warning { 
+      background: rgba(255, 170, 0, 0.1); 
+      border-left-color: #ffaa00; 
+    }
+
+    .alert-item.info { 
+      background: rgba(0, 212, 255, 0.1); 
+      border-left-color: #00d4ff; 
+    }
+
+    .alert-content {
+      flex: 1;
+    }
+
+    .alert-type {
+      font-weight: bold;
+      font-size: 14px;
+      color: #ff4444;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .alert-item.warning .alert-type { color: #ffaa00; }
+    .alert-item.info .alert-type { color: #00d4ff; }
+
+    .alert-details {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .alert-time {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .no-data {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+      font-size: 16px;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 60px;
+      font-size: 18px;
+      color: #00d4ff;
+    }
+
+    .loading::after {
+      content: '...';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+      0%, 20% { content: '.'; }
+      40% { content: '..'; }
+      60%, 100% { content: '...'; }
+    }
+
+    .timestamp {
+      font-size: 11px;
+      color: #666;
+      text-align: right;
+    }
+
+    .health-bar {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .health-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #00ff88 0%, #00cc66 100%);
+      transition: width 0.5s ease;
+      box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+    }
+
+    .health-fill.degraded {
+      background: linear-gradient(90deg, #ffaa00 0%, #ff8800 100%);
+      box-shadow: 0 0 10px rgba(255, 170, 0, 0.5);
+    }
+
+    .health-fill.error {
+      background: linear-gradient(90deg, #ff4444 0%, #cc0000 100%);
+      box-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+    }
+
+    .chart-container {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 10px;
+      padding: 20px;
+      margin-top: 20px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      }
+
+      .header h1 {
+        font-size: 24px;
+      }
+
+      .card-value {
+        font-size: 36px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📊 Monitoring Dashboard</h1>
+    <div class="status-badge" id="overallStatus">Loading...</div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" onclick="refreshData()">🔄 Refresh</button>
+    <button class="btn btn-secondary" onclick="window.location.href='composer.html'">🎬 Composer</button>
+    <button class="btn btn-secondary" onclick="window.location.href='test-monitoring.html'">🧪 Test Dashboard</button>
+    <button class="btn btn-secondary" onclick="toggleAutoRefresh()">
+      <span id="autoRefreshText">⏸️ Pause Auto-Refresh</span>
+    </button>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Total Streams</span>
+        <span class="card-icon">📹</span>
+      </div>
+      <div class="card-value" id="totalStreams">0</div>
+      <div class="card-label">Active streams being monitored</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Healthy Streams</span>
+        <span class="card-icon">✅</span>
+      </div>
+      <div class="card-value" id="healthyStreams">0</div>
+      <div class="card-label">Streams with good health</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Degraded</span>
+        <span class="card-icon">⚠️</span>
+      </div>
+      <div class="card-value" id="degradedStreams">0</div>
+      <div class="card-label">Streams with issues</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Active Alerts</span>
+        <span class="card-icon">🚨</span>
+      </div>
+      <div class="card-value" id="activeAlerts">0</div>
+      <div class="card-label">Current alerts</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Avg Health Score</span>
+        <span class="card-icon">💯</span>
+      </div>
+      <div class="card-value" id="avgHealth">--</div>
+      <div class="card-label">Overall health (0-100)</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Active Rooms</span>
+        <span class="card-icon">🏠</span>
+      </div>
+      <div class="card-value" id="activeRooms">0</div>
+      <div class="card-label">WebRTC rooms</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Total Viewers</span>
+        <span class="card-icon">👥</span>
+      </div>
+      <div class="card-value" id="totalViewers">0</div>
+      <div class="card-label">Connected viewers</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Compositor FPS</span>
+        <span class="card-icon">🎬</span>
+      </div>
+      <div class="card-value" id="compositorFps">0</div>
+      <div class="card-label">Output frame rate</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">
+      <span>📹</span>
+      <span>Stream Details</span>
+    </div>
+    <div id="streamsList" class="stream-list">
+      <div class="loading">Loading streams</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">
+      <span>🚨</span>
+      <span>Active Alerts</span>
+    </div>
+    <div id="alertsList" class="alerts-list">
+      <div class="loading">Loading alerts</div>
+    </div>
+  </div>
+
+  <div class="timestamp" id="lastUpdate">Last updated: --</div>
+
+  <script>
+    let autoRefresh = true;
+    let refreshInterval = null;
+
+    // Fetch and display dashboard data
+    async function refreshData() {
+      try {
+        // Fetch dashboard data
+        const response = await fetch('/api/monitor/dashboard');
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+          updateDashboard(result.data);
+        } else {
+          console.error('Failed to fetch dashboard data:', result);
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard:', error);
+      }
+    }
+
+    function updateDashboard(data) {
+      // Update summary cards
+      const summary = data.metrics?.summary || {};
+      document.getElementById('totalStreams').textContent = summary.totalStreams || 0;
+      document.getElementById('healthyStreams').textContent = summary.healthyStreams || 0;
+      document.getElementById('degradedStreams').textContent = summary.degradedStreams || 0;
+      document.getElementById('activeAlerts').textContent = data.alerts?.length || 0;
+      document.getElementById('avgHealth').textContent = summary.avgHealthScore ? Math.round(summary.avgHealthScore) : '--';
+      
+      // Update system metrics
+      const system = data.metrics?.system || {};
+      document.getElementById('activeRooms').textContent = system.activeRooms || 0;
+      document.getElementById('totalViewers').textContent = system.totalViewers || 0;
+      
+      // Update compositor
+      const compositor = data.metrics?.compositor || {};
+      document.getElementById('compositorFps').textContent = compositor.outputFps || 0;
+
+      // Update overall status
+      const statusBadge = document.getElementById('overallStatus');
+      const status = summary.overallStatus || 'unknown';
+      statusBadge.textContent = status.toUpperCase();
+      statusBadge.className = 'status-badge status-' + status;
+
+      // Update streams list
+      updateStreamsList(data.metrics?.streams || {});
+
+      // Update alerts list
+      updateAlertsList(data.alerts || []);
+
+      // Update timestamp
+      document.getElementById('lastUpdate').textContent = 
+        'Last updated: ' + new Date().toLocaleTimeString();
+    }
+
+    function updateStreamsList(streams) {
+      const container = document.getElementById('streamsList');
+      
+      if (Object.keys(streams).length === 0) {
+        container.innerHTML = '<div class="no-data">No active streams</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      
+      Object.values(streams).forEach(stream => {
+        const item = document.createElement('div');
+        const healthClass = stream.health >= 80 ? '' : stream.health >= 50 ? 'degraded' : 'error';
+        item.className = 'stream-item ' + healthClass;
+        
+        const metrics = stream.metrics || {};
+        const bitrateMbps = (metrics.bitrate / 1000000).toFixed(2);
+        
+        item.innerHTML = `
+          <div class="stream-health ${healthClass}">
+            ${Math.round(stream.health || 0)}
+          </div>
+          <div class="stream-info">
+            <div class="stream-id">${stream.streamId}</div>
+            <div class="stream-url" title="${stream.url || 'Unknown'}">${stream.url || 'Unknown'}</div>
+            <div class="stream-metrics">
+              <div class="metric">
+                <div class="metric-value">${bitrateMbps}</div>
+                <div class="metric-label">Mbps</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">${metrics.fps || 0}</div>
+                <div class="metric-label">FPS</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">${metrics.frameDrops || 0}</div>
+                <div class="metric-label">Drops</div>
+              </div>
+              <div class="metric">
+                <div class="metric-value">${metrics.latency || 0}</div>
+                <div class="metric-label">Latency (ms)</div>
+              </div>
+            </div>
+            <div class="health-bar">
+              <div class="health-fill ${healthClass}" style="width: ${stream.health || 0}%"></div>
+            </div>
+          </div>
+          <div class="stream-status status-${metrics.state || 'playing'}">
+            ${metrics.state || 'playing'}
+          </div>
+        `;
+        
+        container.appendChild(item);
+      });
+    }
+
+    function updateAlertsList(alerts) {
+      const container = document.getElementById('alertsList');
+      
+      if (alerts.length === 0) {
+        container.innerHTML = '<div class="no-data">✅ No active alerts</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      
+      alerts.forEach(alert => {
+        const item = document.createElement('div');
+        const severityClass = alert.severity === 'critical' ? 'error' : 
+                             alert.severity === 'error' ? 'error' : 
+                             alert.severity === 'warning' ? 'warning' : 'info';
+        item.className = 'alert-item ' + severityClass;
+        
+        const time = new Date(alert.timestamp).toLocaleString();
+        const icon = alert.severity === 'critical' ? '🔴' : 
+                    alert.severity === 'error' ? '❌' : 
+                    alert.severity === 'warning' ? '⚠️' : 'ℹ️';
+        
+        item.innerHTML = `
+          <div class="alert-content">
+            <div class="alert-type">${icon} ${alert.type.replace(/_/g, ' ')}</div>
+            <div class="alert-details">
+              Stream: ${alert.streamId || 'System'} | 
+              Severity: ${alert.severity.toUpperCase()}
+            </div>
+            <div class="alert-time">${time}</div>
+          </div>
+        `;
+        
+        container.appendChild(item);
+      });
+    }
+
+    function toggleAutoRefresh() {
+      autoRefresh = !autoRefresh;
+      const btn = document.getElementById('autoRefreshText');
+      
+      if (autoRefresh) {
+        btn.textContent = '⏸️ Pause Auto-Refresh';
+        startAutoRefresh();
+      } else {
+        btn.textContent = '▶️ Resume Auto-Refresh';
+        stopAutoRefresh();
+      }
+    }
+
+    function startAutoRefresh() {
+      if (refreshInterval) return;
+      refreshInterval = setInterval(refreshData, 5000); // Refresh every 5 seconds
+    }
+
+    function stopAutoRefresh() {
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+      }
+    }
+
+    // Initial load
+    refreshData();
+    startAutoRefresh();
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      stopAutoRefresh();
+    });
+  </script>
+</body>
+</html>

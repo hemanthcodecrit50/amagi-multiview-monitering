@@ -28,6 +28,7 @@
     <button id="startPublish">Start publish (WebRTC)</button>
     <button id="stopPublish" class="secondary" disabled>Stop publish</button>
     <label style="margin-left:12px">Room ID: <input id="roomId" value="room1" style="width:120px"></label>
+    <button class="secondary" onclick="window.open('dashboard.html', '_blank')" style="margin-left:auto; background:#0a7;">📊 Dashboard</button>
   </div>
 
   <div id="grid"></div>
@@ -45,6 +46,13 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    // Fix for simple-peer chrome detection in non-Chrome browsers
+    if (typeof chrome === 'undefined') {
+      window.chrome = {};
+    }
+  </script>
 
   <script>
     // quick-savage UI + compositor
@@ -69,6 +77,18 @@
     let localStream = null;
     let peers = {}; // viewerId => SimplePeer instance
     const socket = io();
+    let socketConnected = false;
+
+    // Socket connection handlers
+    socket.on('connect', () => {
+      socketConnected = true;
+      log('✅ Connected to monitoring system');
+    });
+
+    socket.on('disconnect', () => {
+      socketConnected = false;
+      log('⚠️ Disconnected from monitoring system');
+    });
 
     function log(...args) {
       logEl.textContent = (new Date()).toLocaleTimeString() + ' ' + args.join(' ') + '\n' + logEl.textContent;
@@ -116,12 +136,66 @@
 
       // try native or hls.js
       if (Hls.isSupported() && url.match(/\.m3u8($|\?)/i)) {
-        const hls = new Hls();
+        const hls = new Hls({
+          // Configure HLS.js for better stability
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 90,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          maxBufferSize: 60 * 1000 * 1000, // 60 MB
+          maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 2,
+          nudgeMaxRetry: 3,
+          maxFragLookUpTolerance: 0.25,
+          liveSyncDurationCount: 3,
+          liveMaxLatencyDurationCount: 10,
+          liveDurationInfinity: false,
+          debug: false
+        });
+        
         hls.loadSource(url);
         hls.attachMedia(video);
+        
+        // Store hls instance for cleanup
+        video._hlsInstance = hls;
+        
         hls.on(Hls.Events.ERROR, (e, data) => {
-          console.warn('hls error', data);
-          log('HLS error:', data.type, data.details);
+          // Filter out non-fatal errors that are handled automatically
+          const ignoredNonFatalErrors = [
+            'bufferSeekOverHole',
+            'bufferNudgeOnStall',
+            'bufferStallError'
+          ];
+          
+          // Only log and alert on fatal errors or important warnings
+          if (data.fatal) {
+            console.error('HLS fatal error:', data);
+            log('⚠️ HLS fatal error: ' + data.type + ' - ' + data.details);
+            
+            // Try to recover from fatal errors
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                log('🔄 Attempting to recover from network error...');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                log('🔄 Attempting to recover from media error...');
+                hls.recoverMediaError();
+                break;
+              default:
+                log('❌ Unrecoverable error, stream may fail');
+                break;
+            }
+          } else if (!ignoredNonFatalErrors.includes(data.details)) {
+            // Log non-fatal errors that aren't in the ignore list
+            console.warn('HLS non-fatal error:', data.details, data);
+          }
+          // Completely ignore bufferSeekOverHole and similar buffering warnings
+        });
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          log('✅ Stream loaded: ' + url.substring(0, 50) + '...');
         });
       } else {
         video.src = url;
@@ -131,10 +205,45 @@
         log('Video element error for', url, e);
       });
 
-      const entry = { url, video };
+      // Generate unique stream ID
+      const streamId = 'stream-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+      
+      // Create entry with monitoring data
+      const entry = { 
+        url, 
+        video, 
+        streamId,
+        lastMetricsTime: 0,
+        frameCount: 0,
+        lastFrameCount: 0
+      };
+      
       videoEls.push(entry);
       updateGridLayout();
       rebuildTiles();
+      
+      // Register stream with monitoring system
+      if (socketConnected) {
+        const regPayload = {
+          streamId: streamId,
+          url: url,
+          roomId: roomIdInput.value || 'room1'
+        };
+        console.log('📊 Registering stream:', regPayload);
+        socket.emit('monitoring:register-stream', regPayload);
+        log('📊 Stream registered for monitoring: ' + streamId);
+      } else {
+        log('⚠️ Socket not connected, will register when connected');
+        // Register when socket connects
+        socket.once('connect', () => {
+          const regPayload = {
+            streamId: streamId,
+            url: url,
+            roomId: roomIdInput.value || 'room1'
+          });
+          log('📊 Stream registered for monitoring: ' + streamId);
+        });
+      }
 
       // attempt play; some streams require user gesture — but we muted video so should autoplay
       video.play().catch(err => {
@@ -154,11 +263,21 @@
 
     clearBtn.onclick = () => {
       videoEls.forEach(e => {
-        try { e.video.pause(); e.video.src = ''; } catch(_) {}
+        try { 
+          // Properly cleanup HLS instances
+          if (e.video._hlsInstance) {
+            e.video._hlsInstance.destroy();
+            e.video._hlsInstance = null;
+          }
+          e.video.pause(); 
+          e.video.src = ''; 
+          e.video.load();
+        } catch(_) {}
       });
       videoEls = [];
       updateGridLayout();
       rebuildTiles();
+      log('🗑️ All streams cleared');
     };
 
     // compositor: draw grid onto canvas at 25 FPS
@@ -214,6 +333,109 @@
         }
       }
     }
+
+    // Metrics collection and reporting
+    function collectAndReportMetrics() {
+      // Don't report if socket not connected
+      if (!socketConnected) {
+        console.log('Socket not connected, skipping metrics report');
+        return;
+      }
+      
+      const now = Date.now();
+      
+      videoEls.forEach((entry, index) => {
+        const video = entry.video;
+        
+        // Only report if video is ready
+        if (video.readyState < 2) return;
+        
+        try {
+          // Get video playback quality metrics
+          const quality = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : {};
+          const totalFrames = quality.totalVideoFrames || 0;
+          const droppedFrames = quality.droppedVideoFrames || 0;
+          
+          // Calculate FPS
+          const timeDelta = (now - entry.lastMetricsTime) / 1000;
+          const frameDelta = totalFrames - entry.lastFrameCount;
+          const fps = timeDelta > 0 ? Math.round(frameDelta / timeDelta) : 0;
+          
+          // Estimate bitrate from buffer
+          let bitrate = 0;
+          if (video.buffered && video.buffered.length > 0) {
+            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+            const bufferedStart = video.buffered.start(0);
+            const bufferedDuration = bufferedEnd - bufferedStart;
+            // Rough estimate: assume 2.5 Mbps for HD streams
+            bitrate = bufferedDuration > 0 ? Math.round(2500000 * (video.currentTime / bufferedDuration)) : 2500000;
+          } else {
+            bitrate = 2500000; // Default estimate
+          }
+          
+          // Calculate latency (difference between buffer end and current time)
+          let latency = 0;
+          if (video.buffered && video.buffered.length > 0) {
+            const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+            latency = Math.round((bufferedEnd - video.currentTime) * 1000); // ms
+          }
+          
+          // Get resolution
+          const resolution = {
+            width: video.videoWidth || 1920,
+            height: video.videoHeight || 1080
+          };
+          
+          // Determine stream state
+          let state = 'playing';
+          if (video.paused) state = 'paused';
+          else if (video.seeking) state = 'buffering';
+          else if (video.readyState < 3) state = 'buffering';
+          else if (video.error) state = 'error';
+          
+          // Report metrics to server
+          const metricsPayload = {
+            streamId: entry.streamId,
+            metrics: {
+              bitrate: bitrate,
+              fps: fps > 0 ? fps : 25, // Default to 25 if calculation failed
+              resolution: resolution,
+              frameDrops: droppedFrames,
+              latency: latency,
+              bufferDuration: latency,
+              state: state,
+              url: entry.url
+            }
+          };
+          
+          console.log('📊 Sending metrics for', entry.streamId, metricsPayload.metrics);
+          socket.emit('monitoring:report-stream-metrics', metricsPayload);
+          
+          // Update tracking data
+          entry.lastMetricsTime = now;
+          entry.lastFrameCount = totalFrames;
+          
+        } catch (e) {
+          console.warn('Error collecting metrics for stream', entry.streamId, e);
+        }
+      });
+      
+      // Report compositor metrics
+      if (videoEls.length > 0) {
+        socket.emit('monitoring:report-compositor-metrics', {
+          outputFps: TARGET_FPS,
+          processingTime: 15, // Approximate processing time
+          activeStreams: videoEls.length,
+          gridLayout: `${gridRows}x${gridCols}`
+        });
+      }
+    }
+    
+    // Report metrics every 5 seconds
+    setInterval(collectAndReportMetrics, 5000);
+    
+    // Also report on initial load after 2 seconds
+    setTimeout(collectAndReportMetrics, 2000);
 
     // start compositor loop on load
     updateGridLayout();
